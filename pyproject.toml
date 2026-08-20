@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "datasets>=5.0.1",
+    "deepeval>=4.1.8",
     "dotenv>=0.9.9",
     "fastembed>=0.8.0",
     "langchain-core>=1.5.6",

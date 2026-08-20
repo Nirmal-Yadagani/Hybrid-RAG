@@ -3,11 +3,12 @@ import os
 import yaml
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_ollama import ChatOllama
 from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 from qdrant_client import QdrantClient
+from sentence_transformers import CrossEncoder
 
 
 class QAbot:
@@ -40,9 +41,9 @@ class QAbot:
                                               vector_name="dense",
                                               sparse_vector_name="sparse")
 
-        self.retriever = self.vector_store.as_retriever(search_kwargs={"k": 2})
+        self.retriever = self.vector_store.as_retriever(search_kwargs={"k": 20})
 
-        self.llm = ChatOllama(model='gemma4:31b', temperature=0.25)
+        self.llm = ChatOllama(model='gemma4:31b', temperature=0.0) # type: ignore
 
         prompt_template = """You are a technical assistant. Answer the question based strictly on the provided context. If the answer is not in the context, say you do not know.
 
@@ -55,26 +56,54 @@ class QAbot:
 
         self.prompt = ChatPromptTemplate.from_template(prompt_template)
 
+        self.rerank = self._create_cross_encoder_reranker(model=CrossEncoder(params['rerank_model']), top_n=params['top_n'])
+
+        self.join_docs = self._create_format_docs()
+
         self.rag_chain = (
-                            {"context": self.retriever | self.format_docs,
+                            {"docs": self.retriever,
                             "question": RunnablePassthrough()
                             }
-                            | self.prompt | self.llm | StrOutputParser()
+                            | self.rerank
+                            | self.join_docs
+                            | self.prompt 
+                            | self.llm 
+                            | StrOutputParser()
                          )
 
+
+
+
+    def _create_cross_encoder_reranker(self, model: CrossEncoder, top_n: int = 3) -> RunnableLambda:
+        def rerank(inputs: dict) -> dict: # type: ignore
+            query = inputs['question']
+            docs = inputs['docs']
+
+            if not docs:
+                return {'docs': [], 'question': query}
+
+            model_inputs = [[query, doc.page_content] for doc in docs]
+
+            scores = model.predict(model_inputs)
+
+            doc_score_pairs = list(zip(docs, scores))
+
+            doc_score_pairs.sort(key=lambda x: x[1], reverse= True)
+
+            return {'docs': [doc[0] for doc in doc_score_pairs[:top_n]], 'question': query}
+
+        return RunnableLambda(rerank)
 
     def retrieve(self, query):
         return self.retriever.invoke(query)
 
 
-    def format_docs(self, docs):
-        return "\n\n".join(doc.page_content for doc in docs)
+    def _create_format_docs(self) -> RunnableLambda:
+        def format_docs(data: dict) -> dict:
+            data['context'] = "\n\n".join(doc.page_content for doc in data['docs'])
+            return data
+        return RunnableLambda(format_docs)
 
 
     def answer(self, query):
         print(self.rag_chain.invoke(query))
-        
-        
-        
-
-        
