@@ -1,6 +1,4 @@
-raw_data_folderpath: data/raw
-chunk_size: 1000
-chunk_overlap: 200
+urls_path: data/urls/database_urls.txt
 dense_embedding_model: "BAAI/bge-base-en-v1.5"
 dense_embd_dim: 768
 sparse_embedding_model: "Qdrant/bm25"

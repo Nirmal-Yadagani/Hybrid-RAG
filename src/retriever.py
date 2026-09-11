@@ -1,5 +1,5 @@
 import os
-
+import atexit
 import yaml
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -10,7 +10,6 @@ from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 from qdrant_client import QdrantClient
 from sentence_transformers import CrossEncoder
 
-
 class QAbot:
     def __init__(self):
         with open('config.yaml', 'r') as config:
@@ -19,31 +18,38 @@ class QAbot:
         dense_model = params['dense_embedding_model']
         sparse_model = params['sparse_embedding_model']
         hf_token = os.getenv('HF_TOKEN')
-        model_kwargs = {'device': 'cuda',
-                        'token': hf_token}
+        model_kwargs = {'device': 'cuda', 'token': hf_token}
         encode_kwargs = {'normalize_embeddings': params['normalize_embeddings']}
+        
         self.client = QdrantClient(path=params['persist_directory'])
+        self.connections = [self.client]
+        atexit.register(self.close_connections)
         self.collection_name = params['collection_name']
 
-        self.dense_embeddings = HuggingFaceEmbeddings(model_name=dense_model,
-                                                    model_kwargs=model_kwargs,
-                                                    encode_kwargs=encode_kwargs)
+        self.dense_embeddings = HuggingFaceEmbeddings(
+            model_name=dense_model,
+            model_kwargs=model_kwargs,
+            encode_kwargs=encode_kwargs
+        )
         
-        self.sparse_embeddings = FastEmbedSparse(model_name=sparse_model,
-                                               parallel=20,
-                                               batch_size=256)
+        self.sparse_embeddings = FastEmbedSparse(
+            model_name=sparse_model,
+            parallel=20,
+            batch_size=256
+        )
 
-        self.vector_store = QdrantVectorStore(client=self.client,
-                                              collection_name=self.collection_name,
-                                              embedding=self.dense_embeddings,
-                                              sparse_embedding=self.sparse_embeddings,
-                                              retrieval_mode=RetrievalMode.HYBRID,
-                                              vector_name="dense",
-                                              sparse_vector_name="sparse")
+        self.vector_store = QdrantVectorStore(
+            client=self.client,
+            collection_name=self.collection_name,
+            embedding=self.dense_embeddings,
+            sparse_embedding=self.sparse_embeddings,
+            retrieval_mode=RetrievalMode.HYBRID,
+            vector_name="dense",
+            sparse_vector_name="sparse"
+        )
 
         self.retriever = self.vector_store.as_retriever(search_kwargs={"k": 20})
-
-        self.llm = ChatOllama(model='gemma4:31b', temperature=0.0) # type: ignore
+        self.llm = ChatOllama(model='gemma4:31b', temperature=0.0) 
 
         prompt_template = """You are a technical assistant. Answer the question based strictly on the provided context. If the answer is not in the context, say you do not know.
 
@@ -53,29 +59,31 @@ class QAbot:
                              Question: {question}
                              Answer:"""
 
-
         self.prompt = ChatPromptTemplate.from_template(prompt_template)
-
         self.rerank = self._create_cross_encoder_reranker(model=CrossEncoder(params['rerank_model']), top_n=params['top_n'])
-
         self.join_docs = self._create_format_docs()
 
-        self.rag_chain = (
-                            {"docs": self.retriever,
-                            "question": RunnablePassthrough()
-                            }
-                            | self.rerank
-                            | self.join_docs
-                            | self.prompt 
-                            | self.llm 
-                            | StrOutputParser()
-                         )
+        # --- ARCHITECTURE FIX: Modular Chains ---
+        
+        # 1. The Retrieval Sub-Chain (Retrieves Top 20 -> Reranks to Top N)
+        self.retrieval_chain = (
+            {"docs": self.retriever, "question": RunnablePassthrough()}
+            | self.rerank
+        )
 
+        # 2. The Generation Sub-Chain (Formats -> Prompts -> LLM)
+        self.generation_chain = (
+            self.join_docs 
+            | self.prompt 
+            | self.llm 
+            | StrOutputParser()
+        )
 
-
+        # 3. The Full RAG Chain (Combines 1 and 2 for standard runtime)
+        self.rag_chain = self.retrieval_chain | self.generation_chain
 
     def _create_cross_encoder_reranker(self, model: CrossEncoder, top_n: int = 3) -> RunnableLambda:
-        def rerank(inputs: dict) -> dict: # type: ignore
+        def rerank(inputs: dict) -> dict: 
             query = inputs['question']
             docs = inputs['docs']
 
@@ -83,27 +91,64 @@ class QAbot:
                 return {'docs': [], 'question': query}
 
             model_inputs = [[query, doc.page_content] for doc in docs]
-
             scores = model.predict(model_inputs)
-
             doc_score_pairs = list(zip(docs, scores))
-
-            doc_score_pairs.sort(key=lambda x: x[1], reverse= True)
+            doc_score_pairs.sort(key=lambda x: x[1], reverse=True)
 
             return {'docs': [doc[0] for doc in doc_score_pairs[:top_n]], 'question': query}
-
         return RunnableLambda(rerank)
-
-    def retrieve(self, query):
-        return self.retriever.invoke(query)
-
 
     def _create_format_docs(self) -> RunnableLambda:
         def format_docs(data: dict) -> dict:
-            data['context'] = "\n\n".join(doc.page_content for doc in data['docs'])
+            formatted_contexts = []
+            
+            for doc in data['docs']:
+                # Extract the metadata we injected during Docling extraction
+                topic = doc.metadata.get("topic", "Unknown Topic")
+                headings = doc.metadata.get("headings", "No Section")
+                
+                # Create a rich, contextual block for the LLM
+                rich_chunk = (
+                    f"--- Source Topic: {topic} ---\n"
+                    f"Section: {headings}\n"
+                    f"{doc.page_content}"
+                )
+                formatted_contexts.append(rich_chunk)
+                
+            # Join the rich blocks together with double newlines
+            data['context'] = "\n\n".join(formatted_contexts)
             return data
+            
         return RunnableLambda(format_docs)
 
+    def retrieve(self, query: str):
+        """Returns ONLY the reranked documents."""
+        result = self.retrieval_chain.invoke(query)
+        return result['docs']
 
-    def answer(self, query):
-        print(self.rag_chain.invoke(query))
+    def answer(self, query: str):
+        """Standard runtime method: returns just the string answer."""
+        return self.rag_chain.invoke(query)
+
+    def ask_and_retrieve(self, query: str):
+        """
+        EVALUATION METHOD: Runs the CrossEncoder once, passing the exact same 
+        reranked docs to the LLM and back to you.
+        """
+        # Step 1: Get reranked docs
+        retrieval_result = self.retrieval_chain.invoke(query)
+        
+        # Step 2: Pass those exact docs to the LLM
+        answer = self.generation_chain.invoke(retrieval_result)
+        
+        return {
+            "answer": answer,
+            "docs": retrieval_result['docs']
+        }
+
+    def close_connections(self):
+        for conn in self.connections:
+            try:
+                conn.close()
+            except Exception:
+                pass
