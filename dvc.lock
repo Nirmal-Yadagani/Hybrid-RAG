@@ -1,0 +1,142 @@
+schema: '2.0'
+stages:
+  dataset:
+    cmd: .venv/bin/python src/create_dataset.py
+    deps:
+    - path: data/urls/database_urls.txt
+      hash: md5
+      md5: 24b84898de19a33e1f9b262fb797d288
+      size: 7058
+    - path: src/create_dataset.py
+      hash: md5
+      md5: 4630b7e0f752b5ae95042b502daf1045
+      size: 3188
+    params:
+      params.yaml:
+        urls_path: data/urls/database_urls.txt
+    outs:
+    - path: data/raw/ai_ml_raw_html.json
+      hash: md5
+      md5: 45330bb151d997f8ab20a974c3409aa1
+      size: 47898387
+  chunk:
+    cmd: .venv/bin/python src/create_chunks.py
+    deps:
+    - path: data/raw/ai_ml_raw_html.json
+      hash: md5
+      md5: 45330bb151d997f8ab20a974c3409aa1
+      size: 47898387
+    - path: src/create_chunks.py
+      hash: md5
+      md5: e11f6fe314b5739507c0d5a3230ee0a0
+      size: 3998
+    params:
+      params.yaml:
+        chunk_max_tokens: 350
+        chunk_merge_peers: true
+        dense_embedding_model: BAAI/bge-base-en-v1.5
+    outs:
+    - path: data/processed/ai_ml_rag_chunks.json
+      hash: md5
+      md5: af9012f47b3e301e2a9d759b4092710f
+      size: 12570771
+  embed:
+    cmd: .venv/bin/python src/create_embeddings.py
+    deps:
+    - path: data/processed/ai_ml_rag_chunks.json
+      hash: md5
+      md5: af9012f47b3e301e2a9d759b4092710f
+      size: 12570771
+    - path: src/create_embeddings.py
+      hash: md5
+      md5: dd8592eaeb44a1aca754d3fe45cbe5c3
+      size: 4736
+    params:
+      params.yaml:
+        collection_name: simple-wikipedia
+        dense_embd_dim: 768
+        dense_embedding_model: BAAI/bge-base-en-v1.5
+        normalize_embeddings: true
+        persist_directory: data/embeddings
+        sparse_embedding_model: Qdrant/bm25
+    outs:
+    - path: data/embeddings_status.json
+      hash: md5
+      md5: 642b04077d84767b8f683b7f234e4ee6
+      size: 333
+  generate:
+    cmd: .venv/bin/python src/generate_baseline.py
+    deps:
+    - path: data/embeddings_status.json
+      hash: md5
+      md5: 642b04077d84767b8f683b7f234e4ee6
+      size: 333
+    - path: src/generate_baseline.py
+      hash: md5
+      md5: 74ea09c8fd27c3876a761e195cd21af8
+      size: 4583
+    params:
+      params.yaml:
+        rerank_model: cross-encoder/ms-marco-MiniLM-L-6-v2
+        rerank_score_threshold: 0.0
+        retrieval_k: 20
+        synthesizer_model: qwen3.8:27b
+        synthesizer_temperature: 0.7
+        top_n: 5
+    outs:
+    - path: data/eval/goldens_100_baseline.json
+      hash: md5
+      md5: 40a8fa8ae5284f2812ae4ab72341fa15
+      size: 221475
+  eval:
+    cmd: .venv/bin/python src/run_evals.py
+    deps:
+    - path: data/embeddings_status.json
+      hash: md5
+      md5: 642b04077d84767b8f683b7f234e4ee6
+      size: 333
+    - path: data/eval/goldens_100_baseline.json
+      hash: md5
+      md5: 40a8fa8ae5284f2812ae4ab72341fa15
+      size: 221475
+    - path: src/run_evals.py
+      hash: md5
+      md5: 8c1bae86476d7effc0582b863475913d
+      size: 5794
+    params:
+      params.yaml:
+        chat_model: gemma4:31b
+        chat_temperature: 0.0
+        rerank_model: cross-encoder/ms-marco-MiniLM-L-6-v2
+        rerank_score_threshold: 0.0
+        retrieval_k: 20
+        top_n: 5
+    outs:
+    - path: data/eval/generated_test_cases.json
+      hash: md5
+      md5: 595c19dbd42c5b922d85463dd7f2ca1c
+      size: 264663
+    - path: data/eval/raw_evaluations.json
+      hash: md5
+      md5: c8d8dda5316111b266ae37aa9dc9ff63
+      size: 503914
+  export:
+    cmd: .venv/bin/python src/export_results.py
+    deps:
+    - path: data/eval/raw_evaluations.json
+      hash: md5
+      md5: c8d8dda5316111b266ae37aa9dc9ff63
+      size: 503914
+    - path: src/export_results.py
+      hash: md5
+      md5: c5192c5a6dd86783abe97ceeecf2307b
+      size: 3882
+    params:
+      params.yaml:
+        chunk_max_tokens: 350
+        top_n: 5
+    outs:
+    - path: data/eval/evaluation_results.json
+      hash: md5
+      md5: ac18a281883ccc35c26e6d80c406a031
+      size: 345794

@@ -1,27 +1,52 @@
 # 2_chunk_data.py
 import io
 import json
+import os
+import sys
+import time
+import yaml
 import logging
 from rich.console import Console
 from rich.progress import track
+from dotenv import load_dotenv
+load_dotenv()
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from logger import StageLogger  # noqa: E402
 
 from docling.document_converter import DocumentConverter
 from docling.datamodel.base_models import DocumentStream
-from docling.chunking import HierarchicalChunker
+from docling.chunking import HybridChunker
 
 logging.getLogger("docling").setLevel(logging.ERROR)
 console = Console()
+log = StageLogger("chunk")
 
 def chunk_dataset(input_filepath: str, output_filepath: str):
     console.print(f"[bold cyan]Loading raw HTML from {input_filepath}...[/bold cyan]")
-    
+
+    with open('params.yaml', 'r') as config:
+        params = yaml.safe_load(config)
+
     # 1. Load the raw dataset
     with open(input_filepath, "r", encoding="utf-8") as f:
         raw_dataset = json.load(f)
 
     converter = DocumentConverter()
-    chunker = HierarchicalChunker()
+    chunker = HybridChunker(tokenizer=params['dense_embedding_model'],  # Bounds chunks to model tokenizer limits
+                            max_tokens=params['chunk_max_tokens'],      # Caps maximum chunk size at ~250-300 words
+                            merge_peers=params['chunk_merge_peers'])    # Automatically merges consecutive micro-chunks
+    log.info(
+        "chunk.start",
+        "Chunking started",
+        tokenizer=params['dense_embedding_model'],
+        max_tokens=params['chunk_max_tokens'],
+        merge_peers=params['chunk_merge_peers'],
+        docs=len(raw_dataset),
+    )
+
     all_ready_chunks = []
+    started = time.perf_counter()
 
     # 2. Process each document through Docling
     for doc in track(raw_dataset, description="Chunking documents via Docling..."):
@@ -53,15 +78,29 @@ def chunk_dataset(input_filepath: str, output_filepath: str):
                     "page_content": chunk.text,
                     "metadata": chunk_meta
                 })
+
         except Exception as e:
             console.print(f"\n[bold red]Docling failed on {page_title}: {e}[/bold red]")
+
+    # Discard pure noise fragments before saving
+    cleaned_chunks = [
+    c for c in all_ready_chunks
+    if len(c["page_content"].split()) >= 20]
 
     # 4. Save the fully chunked dataset
     console.print(f"\n[bold yellow]Saving chunked dataset to {output_filepath}...[/bold yellow]")
     with open(output_filepath, "w", encoding="utf-8") as f:
-        json.dump(all_ready_chunks, f, indent=4, ensure_ascii=False)
-        
+        json.dump(cleaned_chunks, f, indent=4, ensure_ascii=False)
+
     console.print(f"[bold green]Success! {len(all_ready_chunks)} total chunks saved.[/bold green]")
+    log.info(
+        "chunk.done",
+        "Chunking completed",
+        raw_chunks=len(all_ready_chunks),
+        saved_chunks=len(cleaned_chunks),
+        dropped=len(all_ready_chunks) - len(cleaned_chunks),
+        elapsed_s=round(time.perf_counter() - started, 2),
+    )
 
 if __name__ == "__main__":
     chunk_dataset(

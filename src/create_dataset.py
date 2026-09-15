@@ -1,14 +1,19 @@
-# 1_extract_data.py
 import json
 import time
 import logging
+import os
+import sys
 from datetime import datetime
 from rich.console import Console
 from rich.progress import track
 from scrapling import StealthyFetcher
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from logger import StageLogger  # noqa: E402
+
 logging.getLogger("scrapling").setLevel(logging.WARNING)
 console = Console()
+log = StageLogger("dataset")
 
 def extract_wikipedia_page(topic_url: str) -> dict:
     """Fetches clean HTML and global metadata without chunking."""
@@ -42,9 +47,11 @@ def extract_wikipedia_page(topic_url: str) -> dict:
 def build_raw_dataset(url_list: list[str], output_filepath: str):
     master_dataset = []
     failed_urls = []
+    started = time.perf_counter()
 
     console.print(f"[bold cyan]Starting RAW HTML extraction of {len(url_list)} topics...[/bold cyan]")
-    
+    log.info("dataset.start", "Starting raw HTML extraction", url_count=len(url_list))
+
     for url in track(url_list, description="Downloading pages..."):
         try:
             payload = extract_wikipedia_page(url)
@@ -53,19 +60,28 @@ def build_raw_dataset(url_list: list[str], output_filepath: str):
         except Exception as e:
             console.print(f"\n[bold red]Error processing {url}: {e}[/bold red]")
             failed_urls.append(url)
-            time.sleep(2) 
+            log.warning("dataset.url_failed", "URL extraction failed", url=url, error=str(e))
+            time.sleep(2)
 
     console.print(f"\n[bold yellow]Saving raw dataset to {output_filepath}...[/bold yellow]")
     with open(output_filepath, "w", encoding="utf-8") as f:
         json.dump(master_dataset, f, indent=4, ensure_ascii=False)
-        
+
+    elapsed = time.perf_counter() - started
     console.print(f"[bold green]Saved {len(master_dataset)} raw documents![/bold green]")
+    log.info(
+        "dataset.done",
+        "Raw HTML extraction completed",
+        saved=len(master_dataset),
+        failed=len(failed_urls),
+        elapsed_s=round(elapsed, 2),
+    )
 
 if __name__ == "__main__":
 
     import yaml
 
-    with open('config.yaml', 'r') as config:
+    with open('params.yaml', 'r') as config:
         params = yaml.safe_load(config)
 
     with open(params['urls_path'], 'r') as f:

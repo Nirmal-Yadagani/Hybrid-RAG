@@ -1,11 +1,22 @@
 import os
+import sys
+import time
 import random
+import yaml
 
 from deepeval.dataset import EvaluationDataset
 from deepeval.models import OllamaModel
 from deepeval.synthesizer import Synthesizer
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from logger import StageLogger  # noqa: E402
+
+log = StageLogger("eval_gen")
+
 from retriever import QAbot
+
+with open('params.yaml', 'r') as config:
+    params = yaml.safe_load(config)
 
 rag_bot = QAbot()
 
@@ -47,9 +58,9 @@ for point in seed_points:
     contexts.append(context_group)
 
 ollama_llm = OllamaModel(
-    model='qwen3.6:latest', 
+    model=params['synthesizer_model'],
     base_url="http://localhost:11434",
-    temperature=0.7 
+    temperature=params['synthesizer_temperature']
 )
 
 synthesizer = Synthesizer(model=ollama_llm)
@@ -57,6 +68,9 @@ synthesizer = Synthesizer(model=ollama_llm)
 # 3. Process in chunks to prevent Ollama queue timeouts
 all_goldens = []
 chunk_size = 10  # The A6000 handles chunks of 10 effortlessly
+gen_started = time.perf_counter()
+log.info("eval_gen.start", "Generating goldens", synthesizer=params['synthesizer_model'],
+         temperature=params['synthesizer_temperature'], contexts=len(contexts), chunk_size=chunk_size)
 
 print(f"\nStarting generation of 100 goldens in chunks of {chunk_size} contexts...")
 for i in range(0, len(contexts), chunk_size):
@@ -81,4 +95,6 @@ os.makedirs('data/eval', exist_ok=True)
 eval_dataset.save_as(file_name='goldens_100', file_type='json', directory='data/eval')
 
 rag_bot.client.close()
+log.info("eval_gen.done", "Golden set generated", goldens=len(all_goldens),
+         elapsed_s=round(time.perf_counter() - gen_started, 2))
 print("\n✅ Synthetic evaluation dataset with 100 goldens successfully generated!")

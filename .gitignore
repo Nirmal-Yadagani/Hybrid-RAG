@@ -14,3 +14,13 @@ wheels/
 context.py
 
 .deepeval
+
+# structured per-stage logs (one JSONL file per pipeline stage)
+logs/
+
+# runtime artifacts / local stores (kept out of git & DVC)
+wandb/
+data/embeddings/
+
+# Agents memory
+AGENTS.md

@@ -1,0 +1,89 @@
+stages:
+  dataset:
+    cmd: .venv/bin/python src/create_dataset.py
+    deps:
+      - data/urls/database_urls.txt
+      - src/create_dataset.py
+    params:
+      - params.yaml:
+          - urls_path
+    outs:
+      - data/raw/ai_ml_raw_html.json
+
+  chunk:
+    cmd: .venv/bin/python src/create_chunks.py
+    deps:
+      - data/raw/ai_ml_raw_html.json
+      - src/create_chunks.py
+    params:
+      - params.yaml:
+          - chunk_max_tokens
+          - chunk_merge_peers
+          - dense_embedding_model
+    outs:
+      - data/processed/ai_ml_rag_chunks.json
+
+  embed:
+    cmd: .venv/bin/python src/create_embeddings.py
+    deps:
+      - data/processed/ai_ml_rag_chunks.json
+      - src/create_embeddings.py
+    params:
+      - params.yaml:
+          - dense_embedding_model
+          - dense_embd_dim
+          - sparse_embedding_model
+          - normalize_embeddings
+          - collection_name
+          - persist_directory
+    # The Qdrant store is a local runtime artifact (gitignored, data/embeddings/).
+    # embeddings_status.json is a small versionable marker that anchors this stage in the DAG.
+    outs:
+      - data/embeddings_status.json
+
+  generate:
+    cmd: .venv/bin/python src/generate_baseline.py
+    deps:
+      # embeddings_status.json signals the Qdrant store is ready (generate_baseline.py reads from Qdrant)
+      - data/embeddings_status.json
+      - src/generate_baseline.py
+    params:
+      - params.yaml:
+          - synthesizer_model
+          - synthesizer_temperature
+          - rerank_model
+          - retrieval_k
+          - top_n
+          - rerank_score_threshold
+    outs:
+      - data/eval/goldens_100_baseline.json
+
+  eval:
+    cmd: .venv/bin/python src/run_evals.py
+    deps:
+      - data/eval/goldens_100_baseline.json
+      - data/embeddings_status.json
+      - src/run_evals.py
+    params:
+      - params.yaml:
+          - chat_model
+          - chat_temperature
+          - top_n
+          - retrieval_k
+          - rerank_score_threshold
+          - rerank_model
+    outs:
+      - data/eval/raw_evaluations.json
+      - data/eval/generated_test_cases.json
+
+  export:
+    cmd: .venv/bin/python src/export_results.py
+    deps:
+      - data/eval/raw_evaluations.json
+      - src/export_results.py
+    params:
+      - params.yaml:
+          - top_n
+          - chunk_max_tokens
+    outs:
+      - data/eval/evaluation_results.json

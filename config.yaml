@@ -1,9 +1,0 @@
-urls_path: data/urls/database_urls.txt
-dense_embedding_model: "BAAI/bge-base-en-v1.5"
-dense_embd_dim: 768
-sparse_embedding_model: "Qdrant/bm25"
-normalize_embeddings: True
-collection_name: 'simple-wikipedia'
-persist_directory: data/embeddings
-rerank_model: 'cross-encoder/ms-marco-MiniLM-L-6-v2'
-top_n: 5

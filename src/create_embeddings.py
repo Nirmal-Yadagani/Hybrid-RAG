@@ -1,11 +1,18 @@
 import os
 import json
+import sys
+import time
 import yaml
 from dotenv import load_dotenv
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 from qdrant_client import QdrantClient, models
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from logger import StageLogger  # noqa: E402
+
+log = StageLogger("embed")
 
 
 def load_docling_chunks(filepath: str) -> list[Document]:
@@ -31,7 +38,7 @@ def load_docling_chunks(filepath: str) -> list[Document]:
 def create_embeddings(docs: list[Document]):
     load_dotenv()
 
-    with open('config.yaml', 'r') as config:
+    with open('params.yaml', 'r') as config:
         params = yaml.safe_load(config)
 
     # Note: RecursiveCharacterTextSplitter is completely REMOVED.
@@ -78,9 +85,45 @@ def create_embeddings(docs: list[Document]):
     )
 
     print('Creating dense and sparse embeddings for your Docling chunks...')
+    log.info(
+        "embed.start",
+        "Embedding chunks into Qdrant",
+        docs=len(docs),
+        dense_model=params['dense_embedding_model'],
+        sparse_model=params['sparse_embedding_model'],
+        dim=params['dense_embd_dim'],
+        collection=params['collection_name'],
+    )
+    embed_started = time.perf_counter()
     # Pass our pre-chunked docs directly to Qdrant
     vector_store.add_documents(documents=docs)
     print('Embeddings created and stored successfully!')
+
+    # Write a small versionable status marker (the Qdrant store itself is a local
+    # runtime artifact kept out of git/DVC) so experiments capture what was built.
+    try:
+        point_count = client.count(collection_name=params['collection_name']).count
+    except Exception:
+        point_count = len(docs)
+    status = {
+        "collection": params['collection_name'],
+        "points": point_count,
+        "dense": {"model": params['dense_embedding_model'], "dim": params['dense_embd_dim']},
+        "sparse": {"model": params['sparse_embedding_model']},
+        "normalize_embeddings": params['normalize_embeddings'],
+        "source_chunks": "data/processed/ai_ml_rag_chunks.json",
+        "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    with open('data/embeddings_status.json', 'w', encoding='utf-8') as f:
+        json.dump(status, f, indent=4)
+
+    log.info(
+        "embed.done",
+        "Embeddings created and stored",
+        docs=len(docs),
+        points=point_count,
+        elapsed_s=round(time.perf_counter() - embed_started, 2),
+    )
 
 
 if __name__ == '__main__':

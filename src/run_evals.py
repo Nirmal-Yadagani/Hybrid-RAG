@@ -1,11 +1,17 @@
 import os
 import json
+import time
+import sys
 from dotenv import load_dotenv
+from tqdm import tqdm
 
 # MUST be loaded before DeepEval
 load_dotenv()
 os.environ["DEEPEVAL_PER_ATTEMPT_TIMEOUT_SECONDS_OVERRIDE"] = "120"
 os.environ["DEEPEVAL_DISABLE_TIMEOUTS"] = "1"
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from logger import StageLogger  # noqa: E402
 
 from deepeval import evaluate
 from deepeval.test_case import LLMTestCase, SingleTurnParams
@@ -16,50 +22,68 @@ from deepeval.metrics import (
     ContextualPrecisionMetric,
     GEval
 )
-# 🚨 IMPORT CHANGE: Swap OpenAIModel for GeminiModel
 from deepeval.models import GeminiModel
 from deepeval.evaluate import AsyncConfig
 
-from retriever import QAbot
+log = StageLogger("eval")
 
-dataset = EvaluationDataset()
-dataset.add_goldens_from_json_file(
-    file_path='data/eval/goldens_100.json',
-    input_key_name='input',
-    expected_output_key_name='expected_output',
-    context_key_name='context'
-)
 
-qa_agent = QAbot()
+# If the file exists, we load it instantly instead of generating again.
 test_cases = []
+cache_path = 'data/eval/generated_test_cases.json'
 
-print("Generating agent responses...")
-for golden in dataset.goldens:
-    result = qa_agent.ask_and_retrieve(golden.input)
+if os.path.exists(cache_path):
+    print("⚡ Found cached agent responses! Skipping generation...")
+    with open(cache_path, 'r', encoding='utf-8') as f:
+        cached_data = json.load(f)
+        for item in cached_data:
+            test_cases.append(LLMTestCase(
+                input=item['input'],
+                actual_output=item['actual_output'],
+                retrieval_context=item['retrieval_context'],
+                expected_output=item['expected_output']
+            ))
+else:
+    print("Generating agent responses...")
+    from retriever import QAbot # Only import if we need to generate
+    qa_agent = QAbot()
     
-    # Rebuild the rich context strings exactly as the LLM saw them!
-    rich_contexts = []
-    for doc in result['docs']:
-        topic = doc.metadata.get("topic", "Unknown Topic")
-        headings = doc.metadata.get("headings", "No Section")
-        rich_chunk = (
-            f"--- Source Topic: {topic} ---\n"
-            f"Section: {headings}\n"
-            f"{doc.page_content}"
-        )
-        rich_contexts.append(rich_chunk)
-    
-    test_case = LLMTestCase(
-        input=golden.input,
-        actual_output=str(result['answer']),
-        retrieval_context=rich_contexts, # <--- Pass the metadata-rich list here!
-        expected_output=golden.expected_output
+    dataset = EvaluationDataset()
+    dataset.add_goldens_from_json_file(
+        file_path='data/eval/goldens_100_baseline.json',
+        input_key_name='input',
+        expected_output_key_name='expected_output',
+        context_key_name='context'
     )
-    test_cases.append(test_case)
+    
+    cache_export = []
+    for golden in tqdm(dataset.goldens):
+        result = qa_agent.ask_and_retrieve(golden.input)
+        
+        test_case = LLMTestCase(
+            input=golden.input,
+            actual_output=str(result['answer']),
+            retrieval_context=[doc.page_content for doc in result['docs']],
+            expected_output=golden.expected_output
+        )
+        test_cases.append(test_case)
+        
+        # Build the cache payload
+        cache_export.append({
+            "input": golden.input,
+            "actual_output": str(result['answer']),
+            "retrieval_context": [doc.page_content for doc in result['docs']],
+            "expected_output": golden.expected_output
+        })
+        
+    os.makedirs('data/eval', exist_ok=True)
+    with open(cache_path, 'w', encoding='utf-8') as f:
+        json.dump(cache_export, f, indent=4)
+    print("✅ Agent responses successfully cached to disk!")
 
-# 🚨 MODEL CHANGE: Initialize the Gemini judge
+# --- INITIALIZE METRICS ---
 local_judge = GeminiModel(
-    model="gemini-3.5-flash-lite", 
+    model="gemini-3.5-flash-lite",
     api_key=os.getenv('GOOGLE_API_KEY'),
 )
 
@@ -85,34 +109,39 @@ retriever_metrics = [relevancy, recall, precision]
 generator_metrics = [answer_correctness, citation_accuracy]
 
 
-# 🚨 EXECUTION CHANGE: Chunking removed. The 4M TPM limit easily handles this.
+# --- ADJUST CONCURRENCY FOR GOOGLE API STABILITY ---
 print("\n--- Evaluating all 100 cases concurrently ---")
 
-# Set a safe connection-pool concurrency. 
-batch_config = AsyncConfig(max_concurrent=15)
-
-# Evaluate returns a single TestRun object when not chunked
-test_run = evaluate(
-    test_cases, 
-    retriever_metrics + generator_metrics,
-    async_config=batch_config
-    # 🚨 FIX: Removed ignore_errors=True
+# Lowering this to ensures we don't trigger the Google GenAI SDK connection drops.
+batch_config = AsyncConfig(max_concurrent=5)
+log.info(
+    "eval.start",
+    "Running DeepEval suite",
+    cases=len(test_cases),
+    judge="gemini-3.5-flash-lite",
+    max_concurrent=5,
 )
-
-# Extract the standard results array from the TestRun object
+eval_started = time.perf_counter()
+test_run = evaluate(
+    test_cases,
+    retriever_metrics + generator_metrics,
+    async_config=batch_config)
 results = test_run.test_results
+log.info(
+    "eval.judged",
+    "DeepEval finished judging",
+    evaluated=len(results),
+    elapsed_s=round(time.perf_counter() - eval_started, 2),
+)
 
 # --- SAVE RAW CHECKPOINT ---
 os.makedirs('data/eval', exist_ok=True)
 raw_save_path = 'data/eval/raw_evaluations.json'
-
 raw_data = []
 
 # Manually extract the exact attributes to guarantee no class-method crashes
 for res in results:
     metrics_list = []
-    
-    # Safely parse the metrics
     if hasattr(res, 'metrics_data'):
         for m in res.metrics_data:
             metrics_list.append({
@@ -122,7 +151,6 @@ for res in results:
                 "reason": getattr(m, "reason", "No reason provided")
             })
             
-    # Build the dictionary explicitly
     raw_data.append({
         "input": getattr(res, "input", "N/A"),
         "actual_output": getattr(res, "actual_output", "N/A"),
@@ -135,3 +163,4 @@ with open(raw_save_path, 'w', encoding='utf-8') as f:
     json.dump(raw_data, f, indent=4)
 
 print(f"\n✅ Raw evaluation data safely saved to {raw_save_path}")
+log.info("eval.done", "Raw evaluation saved to disk", saved=len(raw_data), path=raw_save_path)
