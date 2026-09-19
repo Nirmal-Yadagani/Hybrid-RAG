@@ -1,5 +1,5 @@
 # Core Concepts
-https://en.wikipedia.org/api/rest_v1/page/html/Artificial_intelligenc
+https://en.wikipedia.org/api/rest_v1/page/html/Artificial_intelligence
 https://en.wikipedia.org/api/rest_v1/page/html/Machine_learning
 https://en.wikipedia.org/api/rest_v1/page/html/Deep_learning
 https://en.wikipedia.org/api/rest_v1/page/html/Reinforcement_learning
@@ -14,7 +14,7 @@ https://en.wikipedia.org/api/rest_v1/page/html/Federated_learning
 https://en.wikipedia.org/api/rest_v1/page/html/Artificial_neural_network
 https://en.wikipedia.org/api/rest_v1/page/html/Convolutional_neural_network
 https://en.wikipedia.org/api/rest_v1/page/html/Recurrent_neural_network
-https://en.wikipedia.org/api/rest_v1/page/html/Transformer_(machine_learning_architecture)
+https://en.wikipedia.org/api/rest_v1/page/html/Transformer_(deep_learning_architecture)
 https://en.wikipedia.org/api/rest_v1/page/html/Generative_adversarial_network
 https://en.wikipedia.org/api/rest_v1/page/html/Autoencoder
 https://en.wikipedia.org/api/rest_v1/page/html/Variational_autoencoder
@@ -52,7 +52,7 @@ https://en.wikipedia.org/api/rest_v1/page/html/Retrieval-augmented_generation
 https://en.wikipedia.org/api/rest_v1/page/html/Prompt_engineering
 https://en.wikipedia.org/api/rest_v1/page/html/AI_hallucination
 https://en.wikipedia.org/api/rest_v1/page/html/Foundation_model
-https://en.wikipedia.org/api/rest_v1/page/html/Mixture_of_experts_(machine_learning)
+https://en.wikipedia.org/api/rest_v1/page/html/Mixture_of_experts
 https://en.wikipedia.org/api/rest_v1/page/html/Autoregressive_model
 https://en.wikipedia.org/api/rest_v1/page/html/Diffusion_model
 https://en.wikipedia.org/api/rest_v1/page/html/Text-to-image_model
@@ -116,4 +116,4 @@ https://en.wikipedia.org/api/rest_v1/page/html/Existential_risk_from_artificial_
 https://en.wikipedia.org/api/rest_v1/page/html/Turing_test
 https://en.wikipedia.org/api/rest_v1/page/html/Artificial_general_intelligence
 https://en.wikipedia.org/api/rest_v1/page/html/Technological_singularity
-https://en.wikipedia.org/api/rest_v1/page/html/Regulation_of_artificial_intelligenc
+https://en.wikipedia.org/api/rest_v1/page/html/Regulation_of_artificial_intelligence

@@ -1,8 +1,17 @@
+# export_results.py
 import json
 import os
 import sys
 import yaml
+import argparse
 import wandb
+
+# Setup CLI Arguments
+parser = argparse.ArgumentParser(description="Export evaluation results.")
+parser.add_argument("--input", type=str, required=True, help="Path to the raw evaluations JSON")
+parser.add_argument("--output", type=str, required=True, help="Path to save the final exported JSON")
+parser.add_argument("--run_name", type=str, required=True, help="Name for the Weights & Biases run")
+args = parser.parse_args()
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from logger import StageLogger  # noqa: E402
@@ -10,8 +19,8 @@ from wandb_config import common_kwargs  # noqa: E402
 
 log = StageLogger("export")
 
-raw_save_path = 'data/eval/raw_evaluations.json'
-final_save_path = 'data/eval/evaluation_results.json'
+raw_save_path = args.input
+final_save_path = args.output
 
 # 1. Load Config for W&B Hyperparameters
 with open('params.yaml', 'r') as f:
@@ -20,7 +29,7 @@ with open('params.yaml', 'r') as f:
 # 2. Initialize W&B Experiment Run
 wandb.init(
     **common_kwargs(config_params),
-    name=f"eval_top{config_params['top_n']}_chunk{config_params['chunk_max_tokens']}",
+    name=args.run_name,
     config=config_params
 )
 

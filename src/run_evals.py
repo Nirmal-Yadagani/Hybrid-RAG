@@ -1,7 +1,9 @@
+# run_evals.py
 import os
 import json
 import time
 import sys
+import argparse
 from dotenv import load_dotenv
 from tqdm import tqdm
 
@@ -9,6 +11,13 @@ from tqdm import tqdm
 load_dotenv()
 os.environ["DEEPEVAL_PER_ATTEMPT_TIMEOUT_SECONDS_OVERRIDE"] = "120"
 os.environ["DEEPEVAL_DISABLE_TIMEOUTS"] = "1"
+
+# Setup CLI Arguments
+parser = argparse.ArgumentParser(description="Run DeepEval test suite.")
+parser.add_argument("--input", type=str, required=True, help="Path to the input JSON dataset")
+parser.add_argument("--output", type=str, required=True, help="Path to save the raw evaluations JSON")
+parser.add_argument("--cache", type=str, required=True, help="Path for the generated answers cache")
+args = parser.parse_args()
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from logger import StageLogger  # noqa: E402
@@ -27,13 +36,12 @@ from deepeval.evaluate import AsyncConfig
 
 log = StageLogger("eval")
 
-
 # If the file exists, we load it instantly instead of generating again.
 test_cases = []
-cache_path = 'data/eval/generated_test_cases.json'
+cache_path = args.cache
 
 if os.path.exists(cache_path):
-    print("⚡ Found cached agent responses! Skipping generation...")
+    print(f"⚡ Found cached agent responses at {cache_path}! Skipping generation...")
     with open(cache_path, 'r', encoding='utf-8') as f:
         cached_data = json.load(f)
         for item in cached_data:
@@ -44,13 +52,13 @@ if os.path.exists(cache_path):
                 expected_output=item['expected_output']
             ))
 else:
-    print("Generating agent responses...")
+    print(f"Generating agent responses from {args.input}...")
     from retriever import QAbot # Only import if we need to generate
     qa_agent = QAbot()
     
     dataset = EvaluationDataset()
     dataset.add_goldens_from_json_file(
-        file_path='data/eval/goldens_100_baseline.json',
+        file_path=args.input,
         input_key_name='input',
         expected_output_key_name='expected_output',
         context_key_name='context'
@@ -76,7 +84,7 @@ else:
             "expected_output": golden.expected_output
         })
         
-    os.makedirs('data/eval', exist_ok=True)
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
     with open(cache_path, 'w', encoding='utf-8') as f:
         json.dump(cache_export, f, indent=4)
     print("✅ Agent responses successfully cached to disk!")
@@ -110,9 +118,8 @@ generator_metrics = [answer_correctness, citation_accuracy]
 
 
 # --- ADJUST CONCURRENCY FOR GOOGLE API STABILITY ---
-print("\n--- Evaluating all 100 cases concurrently ---")
+print(f"\n--- Evaluating all {len(test_cases)} cases concurrently ---")
 
-# Lowering this to ensures we don't trigger the Google GenAI SDK connection drops.
 batch_config = AsyncConfig(max_concurrent=5)
 log.info(
     "eval.start",
@@ -135,8 +142,8 @@ log.info(
 )
 
 # --- SAVE RAW CHECKPOINT ---
-os.makedirs('data/eval', exist_ok=True)
-raw_save_path = 'data/eval/raw_evaluations.json'
+raw_save_path = args.output
+os.makedirs(os.path.dirname(raw_save_path), exist_ok=True)
 raw_data = []
 
 # Manually extract the exact attributes to guarantee no class-method crashes

@@ -2,8 +2,6 @@ import os
 import atexit
 import yaml
 import weave
-# Initialize Weave tracing for Langchain
-weave_client = weave.init("hybrid-rag-traces")
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
@@ -18,6 +16,12 @@ class QAbot:
         with open('params.yaml', 'r') as config:
             params = yaml.safe_load(config)
 
+        # Weave tracing is initialized lazily here (not at import time) so that
+        # importing this module has no side effects: scripts that only need
+        # `QdrantClient` don't pay the cost of `weave.init()` (or accidentally
+        # enable Weave tracing for a run that shouldn't be traced).
+        self.weave_client = weave.init("hybrid-rag-traces")
+
         dense_model = params['dense_embedding_model']
         sparse_model = params['sparse_embedding_model']
         hf_token = os.getenv('HF_TOKEN')
@@ -30,7 +34,7 @@ class QAbot:
         self.collection_name = params['collection_name']
 
         # Key the weave cost table to whichever chat model is configured
-        weave_client.add_cost(
+        self.weave_client.add_cost(
             llm_id=params['chat_model'],
             prompt_token_cost=0.14 / 1_000_000,
             completion_token_cost=0.40 / 1_000_000

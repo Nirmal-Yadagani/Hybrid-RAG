@@ -17,8 +17,8 @@ persist_directory: data/embeddings
 
 # Retrieval & reranking
 rerank_model: 'cross-encoder/ms-marco-MiniLM-L-6-v2'
-retrieval_k: 20                    # hybrid retrieve top-k, then rerank down to top_n
-rerank_score_threshold: 0.0       # keep only reranker scores strictly above this
+retrieval_k: 60                    # hybrid retrieve top-k, then rerank down to top_n
+rerank_score_threshold: -2.5       # keep only reranker scores strictly above this
 top_n: 5
 
 # Chat / answer generation
@@ -28,6 +28,16 @@ chat_temperature: 0.0
 # Synthetic golden-set generation
 synthesizer_model: 'qwen3.8:27b'
 synthesizer_temperature: 0.7
+
+# Golden quality controls (single-chunk-baseline tier)
+quality_threshold: 0.6             # retry target for synthetic_input_quality_threshold (0-1)
+max_quality_retries: 3             # retries before keeping the best-effort golden regardless of score
+min_golden_quality_to_keep: 0.5    # hard floor — goldens still below this after retries are dropped
+num_evolutions: 1                  # evolution passes per question (DeepEval default is 1)
+
+# Validation / LLM-as-a-judge
+validator_model: 'gemma4:31b'
+validator_temperature: 0.0
 
 # Weights & Biases — one parent project for all runs, shared group per logical
 # experiment. Both values can be overridden by the WANDB_PROJECT / WANDB_GROUP

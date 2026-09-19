@@ -1,4 +1,7 @@
 stages:
+  # ==========================================
+  # SHARED DATA INGESTION & RETRIEVAL PIPELINE
+  # ==========================================
   dataset:
     cmd: .venv/bin/python src/create_dataset.py
     deps:
@@ -36,32 +39,46 @@ stages:
           - normalize_embeddings
           - collection_name
           - persist_directory
-    # The Qdrant store is a local runtime artifact (gitignored, data/embeddings/).
-    # embeddings_status.json is a small versionable marker that anchors this stage in the DAG.
     outs:
       - data/embeddings_status.json
 
+  # ==========================================
+  # BRANCH A: SYNTHETIC BASELINE PIPELINE
+  # ==========================================
   generate:
     cmd: .venv/bin/python src/generate_baseline.py
     deps:
-      # embeddings_status.json signals the Qdrant store is ready (generate_baseline.py reads from Qdrant)
       - data/embeddings_status.json
       - src/generate_baseline.py
     params:
       - params.yaml:
           - synthesizer_model
           - synthesizer_temperature
-          - rerank_model
-          - retrieval_k
-          - top_n
-          - rerank_score_threshold
+          - persist_directory
+          - collection_name
+          - quality_threshold
+          - max_quality_retries
+          - min_golden_quality_to_keep
+          - num_evolutions
     outs:
-      - data/eval/goldens_100_baseline.json
+      - data/eval/goldens_100_raw.json
 
-  eval:
-    cmd: .venv/bin/python src/run_evals.py
+  validate_goldens:
+    cmd: .venv/bin/python src/validate_goldens.py
     deps:
-      - data/eval/goldens_100_baseline.json
+      - data/eval/goldens_100_raw.json
+      - src/validate_goldens.py
+    params:
+      - params.yaml:
+          - validator_model
+          - validator_temperature
+    outs:
+      - data/eval/goldens_clean.json
+
+  eval_synthetic:
+    cmd: .venv/bin/python src/run_evals.py --input data/eval/goldens_clean.json --output data/eval/raw_evaluations_synthetic.json --cache data/eval/cache_synthetic.json
+    deps:
+      - data/eval/goldens_clean.json
       - data/embeddings_status.json
       - src/run_evals.py
     params:
@@ -73,17 +90,50 @@ stages:
           - rerank_score_threshold
           - rerank_model
     outs:
-      - data/eval/raw_evaluations.json
-      - data/eval/generated_test_cases.json
+      - data/eval/raw_evaluations_synthetic.json
+      - data/eval/cache_synthetic.json
 
-  export:
-    cmd: .venv/bin/python src/export_results.py
+  export_synthetic:
+    cmd: .venv/bin/python src/export_results.py --input data/eval/raw_evaluations_synthetic.json --output data/eval/evaluation_results_synthetic.json --run_name "eval_synthetic_baseline"
     deps:
-      - data/eval/raw_evaluations.json
+      - data/eval/raw_evaluations_synthetic.json
       - src/export_results.py
     params:
       - params.yaml:
           - top_n
           - chunk_max_tokens
     outs:
-      - data/eval/evaluation_results.json
+      - data/eval/evaluation_results_synthetic.json
+
+  # ==========================================
+  # BRANCH B: MANUAL MULTI-CHUNK PIPELINE
+  # ==========================================
+  eval_manual:
+    cmd: .venv/bin/python src/run_evals.py --input data/eval/manual_eval.json --output data/eval/raw_evaluations_manual.json --cache data/eval/cache_manual.json
+    deps:
+      - data/eval/manual_eval.json
+      - data/embeddings_status.json
+      - src/run_evals.py
+    params:
+      - params.yaml:
+          - chat_model
+          - chat_temperature
+          - top_n
+          - retrieval_k
+          - rerank_score_threshold
+          - rerank_model
+    outs:
+      - data/eval/raw_evaluations_manual.json
+      - data/eval/cache_manual.json
+
+  export_manual:
+    cmd: .venv/bin/python src/export_results.py --input data/eval/raw_evaluations_manual.json --output data/eval/evaluation_results_manual.json --run_name "eval_manual_multichunk"
+    deps:
+      - data/eval/raw_evaluations_manual.json
+      - src/export_results.py
+    params:
+      - params.yaml:
+          - top_n
+          - chunk_max_tokens
+    outs:
+      - data/eval/evaluation_results_manual.json

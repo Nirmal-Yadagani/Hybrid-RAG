@@ -2,3 +2,7 @@
 /raw_evaluations.json
 /generated_test_cases.json
 /evaluation_results.json
+/goldens_100_raw.json
+/goldens_clean.json
+/generated_manual_test_cases.json
+/manual_eval.json

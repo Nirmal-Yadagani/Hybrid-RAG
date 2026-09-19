@@ -2,127 +2,177 @@ import os
 import random
 import sys
 import time
-import yaml
-import wandb
+
+import pandas as pd
 import weave
+import yaml
 from deepeval.dataset import EvaluationDataset
 from deepeval.models import OllamaModel
-from deepeval.synthesizer import Synthesizer
-from retriever import QAbot
+from deepeval.synthesizer import Evolution, Synthesizer
+from deepeval.synthesizer.config import EvolutionConfig, FiltrationConfig, StylingConfig
+from qdrant_client import QdrantClient
+
+import wandb
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from logger import StageLogger  # noqa: E402
-from wandb_config import common_kwargs  # noqa: E402
+from logger import StageLogger
+from wandb_config import common_kwargs
 
 log = StageLogger("generate")
 
 with open('params.yaml', 'r') as config:
     params = yaml.safe_load(config)
 
-# 1. Initialize Tracking & Tracing
-# generator_model / temperature come from params.yaml so a dataset is traceable to the model that made it
+# 1. Initialize Configuration & Tracking
 generation_config = {
     "dataset_tier": "single-chunk-baseline",
     "generator_model": params["synthesizer_model"],
     "temperature": params["synthesizer_temperature"],
-    "max_goldens_per_context": 1,
-    "chunk_size_batch": 1,
     "min_word_count": 50,
-    "target_dataset_size": 100
+    "target_dataset_size": 100,
+    "quality_threshold": params.get("quality_threshold", 0.6),
+    "max_quality_retries": params.get("max_quality_retries", 3),
+    "min_golden_quality": params.get("min_golden_quality_to_keep", 0.5),
+    "num_evolutions": params.get("num_evolutions", 1),
 }
 
-# wandb tracks the overall experiment and stores the dataset file
 wandb.init(**common_kwargs(params), config=generation_config, name="generate_phase1_baseline")
-
-# weave traces the latency, inputs, and outputs of the generation calls
 weave.init("hybrid-rag-traces")
 
-rag_bot = QAbot()
-
 # 2. Fetch and Filter Chunks
-records, _ = rag_bot.client.scroll(
-    rag_bot.collection_name, 
-    limit=1000, 
-    with_payload=True, 
+db = QdrantClient(path=params['persist_directory'])
+records, _ = db.scroll(
+    params['collection_name'],
+    limit=1000,
+    with_payload=True,
     with_vectors=False
 )
 
 valid_records = [
-    r for r in records 
-    if len(r.payload.get("page_content", "").split()) > generation_config["min_word_count"]
+    r for r in records
+    if len(r.payload.get("page_content", "").split()) > generation_config["min_word_count"] # type: ignore
 ]
 seed_points = random.sample(valid_records, min(generation_config["target_dataset_size"], len(valid_records)))
 
 contexts = []
 print(f"Preparing {len(seed_points)} isolated contexts for baseline generation...")
-
 for point in seed_points:
-    seed_text = point.payload.get("page_content")
-    topic = point.payload.get("metadata", {}).get("topic", "Unknown Topic")
-    heading = point.payload.get("metadata", {}).get("headings", "Unknown Section")
-    
-    rich_context = f"DOCUMENT TOPIC: {topic}\nSECTION: {heading}\nCONTENT:\n{seed_text}"
-    contexts.append([rich_context])
+    seed_text = point.payload.get("page_content") # type: ignore
+    topic = point.payload.get("metadata", {}).get("topic", "Unknown Topic") # type: ignore
+    heading = point.payload.get("metadata", {}).get("headings", "Unknown Section") # type: ignore
+    contexts.append([f"DOCUMENT TOPIC: {topic}\nSECTION: {heading}\nCONTENT:\n{seed_text}"])
+
+db.close() # Free up resources early
 
 # 3. Initialize Generator
 ollama_llm = OllamaModel(
-    model=generation_config["generator_model"], 
+    model=generation_config["generator_model"],
     base_url="http://localhost:11434",
-    temperature=generation_config["temperature"] 
+    temperature=generation_config["temperature"]
 )
-synthesizer = Synthesizer(model=ollama_llm)
+
+filtration_config = FiltrationConfig(
+    critic_model=ollama_llm,
+    synthetic_input_quality_threshold=generation_config["quality_threshold"],
+    max_quality_retries=generation_config["max_quality_retries"],
+)
+
+evolution_config = EvolutionConfig(
+    evolutions={
+        Evolution.CONCRETIZING: 0.4,
+        Evolution.CONSTRAINED: 0.3,
+        Evolution.REASONING: 0.3,
+    },
+    num_evolutions=generation_config["num_evolutions"],
+)
+
+styling_config = StylingConfig(
+    task="Machine Learning and Artificial Intelligence concepts",
+    scenario="A software engineer or student studying AI",
+    input_format="Natural language questions a real user would type",
+    expected_output_format="A direct, factual answer grounded only in the given content",
+)
+
+synthesizer = Synthesizer(
+    model=ollama_llm,
+    filtration_config=filtration_config,
+    evolution_config=evolution_config,
+    styling_config=styling_config,
+)
 
 # 4. Wrap generation in a Weave op to trace inputs/outputs and latency
 @weave.op()
-def generate_batch(context_chunk):
-    return synthesizer.generate_goldens_from_contexts(
-        contexts=context_chunk,
+def generate_single_context(ctx_list):
+    synthesizer.generate_goldens_from_contexts(
+        contexts=[ctx_list],
         include_expected_output=True,
-        max_goldens_per_context=generation_config["max_goldens_per_context"]
+        max_goldens_per_context=1
     )
+    # Extract the internal state immediately before the next loop wipes it
+    return synthesizer.synthetic_goldens, synthesizer.to_pandas()
+
+gen_started = time.perf_counter()
+log.info("generate.start", "Generating goldens", **generation_config)
 
 all_goldens = []
-chunk_size = generation_config["chunk_size_batch"]
-gen_started = time.perf_counter()
+all_dfs = []
 
-log.info(
-    "generate.start",
-    "Generating goldens",
-    generator_model=generation_config["generator_model"],
-    temperature=generation_config["temperature"],
-    contexts=len(contexts),
-    batch_size=chunk_size,
-    min_word_count=generation_config["min_word_count"],
-    target_size=generation_config["target_dataset_size"],
-)
-print(f"\nGenerating 100 goldens (1 per chunk) in batches of {chunk_size}...")
-for i in range(0, len(contexts), chunk_size):
-    batch_num = (i // chunk_size) + 1
-    total_batches = (len(contexts) + chunk_size - 1) // chunk_size
-    print(f"Processing batch {batch_num} of {total_batches}...")
-    
-    context_chunk = contexts[i : i + chunk_size]
-    
+print(f"\nGenerating {len(contexts)} goldens (1 per chunk)...")
+for i, ctx in enumerate(contexts, 1):
+    print(f"Processing context {i} of {len(contexts)}...")
     try:
-        # Calls the traced function
-        batch_goldens = generate_batch(context_chunk)
+        batch_goldens, batch_df = generate_single_context(ctx)
         all_goldens.extend(batch_goldens)
-        
-    except Exception as e:
-        print(f"⚠️ Skipping context {i + 1} due to LLM failure: {e}")
+        all_dfs.append(batch_df)
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️ Skipping context {i} due to LLM failure: {e}")
         continue
 
-# 5. Save locally
-eval_dataset = EvaluationDataset(goldens=all_goldens)
-os.makedirs('data/eval', exist_ok=True)
-file_path = 'data/eval/goldens_100_baseline.json'
-eval_dataset.save_as(
-    file_name='goldens_100_baseline', 
-    file_type='json', 
-    directory='data/eval'
-)
+# 5. Quality report + hard filter
+# Rebuild the master DataFrame and Goldens list safely
+if all_dfs:
+    df = pd.concat(all_dfs, ignore_index=True)
+else:
+    df = pd.DataFrame()
 
-# 6. Version the dataset in W&B as an Artifact
+pre_filter_count = len(all_goldens)
+
+if not df.empty and "synthetic_input_quality" in df.columns:
+    mean_q = float(df["synthetic_input_quality"].mean())
+    min_q = float(df["synthetic_input_quality"].min())
+    below_threshold = int((df["synthetic_input_quality"] < generation_config["quality_threshold"]).sum())
+
+    log.info(  # noqa: PLE1205
+        "generate.quality",
+        "Golden quality distribution",
+        mean_input_quality=round(mean_q, 3),
+        min_input_quality=round(min_q, 3),
+        below_retry_threshold=below_threshold,
+    )
+    wandb.log({
+        "quality/mean_input_quality": mean_q,
+        "quality/min_input_quality": min_q,
+        "quality/pct_below_threshold": below_threshold / len(df),
+    })
+
+    # Hard floor: drop goldens still below this score even after retries.
+    keep_mask = df["synthetic_input_quality"] >= generation_config["min_golden_quality"]
+    final_goldens = [g for g, keep in zip(all_goldens, keep_mask) if keep]
+    
+    dropped = pre_filter_count - len(final_goldens)
+    if dropped:
+        print(f"Dropped {dropped} goldens below quality floor {generation_config['min_golden_quality']}")
+else:
+    print("⚠️ No quality scores available — skipping quality filter.")
+    final_goldens = all_goldens
+
+# 6. Save locally
+os.makedirs('data/eval', exist_ok=True)
+file_path = 'data/eval/goldens_100_raw.json'
+eval_dataset = EvaluationDataset(goldens=final_goldens)
+eval_dataset.save_as(file_name='goldens_100_raw', file_type='json', directory='data/eval')
+
+# 7. Version the dataset in W&B as an Artifact
 artifact = wandb.Artifact(
     name="single-chunk-baseline-dataset",
     type="dataset",
@@ -132,11 +182,11 @@ artifact.add_file(file_path)
 wandb.log_artifact(artifact)
 
 wandb.finish()
-rag_bot.client.close()
-log.info(
+log.info(  # noqa: PLE1205
     "generate.done",
     "Golden set generated",
-    goldens=len(all_goldens),
+    goldens=len(final_goldens),
+    dropped_low_quality=pre_filter_count - len(final_goldens),
     elapsed_s=round(time.perf_counter() - gen_started, 2),
 )
-print("\n✅ Single-Chunk Baseline dataset generated, traced via Weave, and versioned in W&B!")
+print(f"\n✅ {len(final_goldens)} goldens kept (of {pre_filter_count} generated), traced via Weave, and versioned in W&B!")
