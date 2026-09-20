@@ -5,7 +5,6 @@ import time
 
 import pandas as pd
 import weave
-import yaml
 from deepeval.dataset import EvaluationDataset
 from deepeval.models import OllamaModel
 from deepeval.synthesizer import Evolution, Synthesizer
@@ -14,35 +13,39 @@ from qdrant_client import QdrantClient
 
 import wandb
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from logger import StageLogger
-from wandb_config import common_kwargs
+# Run via `python src/<stage>.py`, so push the repo root first to make
+# ``from src...`` imports resolve regardless of working directory.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from src.logger import StageLogger
+from src.data import load_config
 
 log = StageLogger("generate")
 
-with open('params.yaml', 'r') as config:
-    params = yaml.safe_load(config)
+cfg = load_config()
 
 # 1. Initialize Configuration & Tracking
 generation_config = {
     "dataset_tier": "single-chunk-baseline",
-    "generator_model": params["synthesizer_model"],
-    "temperature": params["synthesizer_temperature"],
+    "generator_model": cfg.synthesizer_model,
+    "temperature": cfg.synthesizer_temperature,
     "min_word_count": 50,
     "target_dataset_size": 100,
-    "quality_threshold": params.get("quality_threshold", 0.6),
-    "max_quality_retries": params.get("max_quality_retries", 3),
-    "min_golden_quality": params.get("min_golden_quality_to_keep", 0.5),
-    "num_evolutions": params.get("num_evolutions", 1),
+    "quality_threshold": cfg.quality_threshold,
+    "max_quality_retries": cfg.max_quality_retries,
+    "min_golden_quality": cfg.min_golden_quality_to_keep,
+    "num_evolutions": cfg.num_evolutions,
 }
 
-wandb.init(**common_kwargs(params), config=generation_config, name="generate_phase1_baseline")
+wandb.init(**cfg.wandb_common_kwargs(), config=cfg, name="generate_phase1_baseline")
 weave.init("hybrid-rag-traces")
 
 # 2. Fetch and Filter Chunks
-db = QdrantClient(path=params['persist_directory'])
+db = QdrantClient(path=cfg.persist_directory)
 records, _ = db.scroll(
-    params['collection_name'],
+    cfg.collection_name,
     limit=1000,
     with_payload=True,
     with_vectors=False

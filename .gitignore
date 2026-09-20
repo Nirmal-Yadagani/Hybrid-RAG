@@ -22,5 +22,8 @@ logs/
 wandb/
 data/embeddings/
 
+# Playwright MCP session artifacts
+.playwright-mcp/
+
 # Agents memory
 AGENTS.md

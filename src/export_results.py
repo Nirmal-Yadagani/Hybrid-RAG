@@ -2,7 +2,13 @@
 import json
 import os
 import sys
-import yaml
+
+# Run via `python src/<stage>.py`, so push the repo root first to make
+# ``from src...`` imports resolve regardless of working directory.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 import argparse
 import wandb
 
@@ -13,9 +19,8 @@ parser.add_argument("--output", type=str, required=True, help="Path to save the 
 parser.add_argument("--run_name", type=str, required=True, help="Name for the Weights & Biases run")
 args = parser.parse_args()
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from logger import StageLogger  # noqa: E402
-from wandb_config import common_kwargs  # noqa: E402
+from src.logger import StageLogger
+from src.data import load_config
 
 log = StageLogger("export")
 
@@ -23,14 +28,13 @@ raw_save_path = args.input
 final_save_path = args.output
 
 # 1. Load Config for W&B Hyperparameters
-with open('params.yaml', 'r') as f:
-    config_params = yaml.safe_load(f)
+cfg = load_config()
 
 # 2. Initialize W&B Experiment Run
 wandb.init(
-    **common_kwargs(config_params),
+    **cfg.wandb_common_kwargs(),
     name=args.run_name,
-    config=config_params
+    config=cfg
 )
 
 with open(raw_save_path, 'r', encoding='utf-8') as f:

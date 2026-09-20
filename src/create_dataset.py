@@ -1,16 +1,23 @@
-import json
-import time
-import logging
 import os
 import sys
+
+# Stages run via DVC as `python src/<stage>.py`, which puts only ``src/`` on the
+# path. Push the repo root (``src/data``'s parent) in so ``from src...`` imports
+# resolve from anywhere.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+import time
+import logging
 from datetime import datetime
 from rich.console import Console
 from rich.progress import track
 from scrapling import StealthyFetcher
 from bs4 import BeautifulSoup
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from logger import StageLogger  # noqa: E402
+from src.logger import StageLogger
+from src.data import RawPage, write_json_array
 
 logging.getLogger("scrapling").setLevel(logging.WARNING)
 console = Console()
@@ -89,7 +96,7 @@ def extract_wikipedia_page(topic_url: str) -> dict:
         "raw_html": str(soup)
     }
 
-def build_raw_dataset(url_list: list[str], output_filepath: str):
+def build_raw_dataset(url_list: list[str], cfg):
     master_dataset = []
     failed_urls = []
     started = time.perf_counter()
@@ -108,9 +115,9 @@ def build_raw_dataset(url_list: list[str], output_filepath: str):
             log.warning("dataset.url_failed", "URL extraction failed", url=url, error=str(e))
             time.sleep(2)
 
-    console.print(f"\n[bold yellow]Saving raw dataset to {output_filepath}...[/bold yellow]")
-    with open(output_filepath, "w", encoding="utf-8") as f:
-        json.dump(master_dataset, f, indent=4, ensure_ascii=False)
+    console.print("\n[bold yellow]Saving raw dataset to data/raw/ai_ml_raw_html.json...[/bold yellow]")
+    records = [RawPage.model_validate(d) for d in master_dataset]
+    write_json_array("data/raw/ai_ml_raw_html.json", records)
 
     elapsed = time.perf_counter() - started
     console.print(f"[bold green]Saved {len(master_dataset)} raw documents![/bold green]")
@@ -123,12 +130,11 @@ def build_raw_dataset(url_list: list[str], output_filepath: str):
     )
 
 if __name__ == "__main__":
-    import yaml
+    from src.data import load_config
 
-    with open('params.yaml', 'r') as config:
-        params = yaml.safe_load(config)
+    cfg = load_config()
 
-    with open(params['urls_path'], 'r') as f:
+    with open(cfg.urls_path, "r") as f:
         ai_ml_wikipedia_urls = []
         for line in f:
             # Strip whitespace, newlines, and stray quotes
@@ -136,5 +142,5 @@ if __name__ == "__main__":
             # Ignore empty lines and comments
             if clean_url and not clean_url.startswith('#'):
                 ai_ml_wikipedia_urls.append(clean_url)
-    
-    build_raw_dataset(ai_ml_wikipedia_urls, "data/raw/ai_ml_raw_html.json")
+
+    build_raw_dataset(ai_ml_wikipedia_urls, cfg)

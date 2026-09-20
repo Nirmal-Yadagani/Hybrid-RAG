@@ -1,16 +1,21 @@
 import argparse
 import os
 import sys
-import yaml
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
-# Load parameters from params.yaml
-with open("params.yaml", "r") as f:
-    params = yaml.safe_load(f)
+# inspect_chunks.py is a top-level script (run from src/), so push the repo root
+# in so `from src.data import load_config` resolves.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
-PERSIST_DIR = params.get("persist_directory", "data/embeddings")
-COLLECTION_NAME = params.get("collection_name", "simple-wikipedia")
+from src.data import load_config
+
+cfg = load_config()
+
+PERSIST_DIR = cfg.persist_directory
+COLLECTION_NAME = cfg.collection_name
 
 # The Wikipedia appendix sections to filter out
 EXCLUDED_SECTIONS = [

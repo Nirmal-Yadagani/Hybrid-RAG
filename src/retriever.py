@@ -1,6 +1,17 @@
 import os
+import sys
+
+# retrieve.py is loaded as a top-level module (run_evals.py does
+# `from retriever import QAbot`), so only ``src/`` is on the path. Push the repo
+# root (``src/data``'s parent) in so ``from src.data import ...`` resolves.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+import sys
 import atexit
-import yaml
+
+from src.data import load_config
 import weave
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -13,8 +24,7 @@ from sentence_transformers import CrossEncoder
 
 class QAbot:
     def __init__(self):
-        with open('params.yaml', 'r') as config:
-            params = yaml.safe_load(config)
+        cfg = load_config()
 
         # Weave tracing is initialized lazily here (not at import time) so that
         # importing this module has no side effects: scripts that only need
@@ -22,20 +32,20 @@ class QAbot:
         # enable Weave tracing for a run that shouldn't be traced).
         self.weave_client = weave.init("hybrid-rag-traces")
 
-        dense_model = params['dense_embedding_model']
-        sparse_model = params['sparse_embedding_model']
+        dense_model = cfg.dense_embedding_model
+        sparse_model = cfg.sparse_embedding_model
         hf_token = os.getenv('HF_TOKEN')
         model_kwargs = {'device': 'cuda', 'token': hf_token}
-        encode_kwargs = {'normalize_embeddings': params['normalize_embeddings']}
+        encode_kwargs = {'normalize_embeddings': cfg.normalize_embeddings}
         
-        self.client = QdrantClient(path=params['persist_directory'])
+        self.client = QdrantClient(path=cfg.persist_directory)
         self.connections = [self.client]
         atexit.register(self.close_connections)
-        self.collection_name = params['collection_name']
+        self.collection_name = cfg.collection_name
 
         # Key the weave cost table to whichever chat model is configured
         self.weave_client.add_cost(
-            llm_id=params['chat_model'],
+            llm_id=cfg.chat_model,
             prompt_token_cost=0.14 / 1_000_000,
             completion_token_cost=0.40 / 1_000_000
         )
@@ -62,8 +72,8 @@ class QAbot:
             sparse_vector_name="sparse"
         )
 
-        self.retriever = self.vector_store.as_retriever(search_kwargs={"k": params['retrieval_k']})
-        self.llm = ChatOllama(model=params['chat_model'], temperature=params['chat_temperature'])
+        self.retriever = self.vector_store.as_retriever(search_kwargs={"k": cfg.retrieval_k})
+        self.llm = ChatOllama(model=cfg.chat_model, temperature=cfg.chat_temperature)
 
         prompt_template = """You are a precise technical assistant. Answer the question based ONLY on the provided documents. 
         If the answer is not in the context, say "I do not know".
@@ -79,9 +89,9 @@ class QAbot:
 
         self.prompt = ChatPromptTemplate.from_template(prompt_template)
         self.rerank = self._create_cross_encoder_reranker(
-            model=CrossEncoder(params['rerank_model']),
-            top_n=params['top_n'],
-            score_threshold=params['rerank_score_threshold']
+            model=CrossEncoder(cfg.rerank_model),
+            top_n=cfg.top_n,
+            score_threshold=cfg.rerank_score_threshold
         )
         self.join_docs = self._create_format_docs()
 

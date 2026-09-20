@@ -3,7 +3,6 @@ import os
 import re
 import sys
 import time
-import yaml
 from pydantic import BaseModel, Field
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
@@ -11,14 +10,15 @@ from langchain_core.prompts import ChatPromptTemplate
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from logger import StageLogger  # noqa: E402
 
+from src.data import load_config
+
 log = StageLogger("validate_goldens")
 
 # 1. Load Parameters
-with open("params.yaml", "r") as f:
-    params = yaml.safe_load(f)
+cfg = load_config()
 
-validator_model = params.get("validator_model", "gemma4:31b")
-validator_temperature = params.get("validator_temperature", 0.0)
+validator_model = cfg.validator_model
+validator_temperature = cfg.validator_temperature
 
 INPUT_PATH = "data/eval/goldens_100_raw.json"
 OUTPUT_PATH = "data/eval/goldens_clean.json"
