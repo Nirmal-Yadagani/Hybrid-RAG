@@ -94,7 +94,7 @@ stages:
       - data/eval/cache_synthetic.json
 
   export_synthetic:
-    cmd: .venv/bin/python src/export_results.py --input data/eval/raw_evaluations_synthetic.json --output data/eval/evaluation_results_synthetic.json --run_name "eval_synthetic_baseline"
+    cmd: .venv/bin/python src/export_results.py --input data/eval/raw_evaluations_synthetic.json --output data/eval/evaluation_results_synthetic.json --run_name "synthetic-tuning-v1"
     deps:
       - data/eval/raw_evaluations_synthetic.json
       - src/export_results.py
@@ -127,7 +127,7 @@ stages:
       - data/eval/cache_manual.json
 
   export_manual:
-    cmd: .venv/bin/python src/export_results.py --input data/eval/raw_evaluations_manual.json --output data/eval/evaluation_results_manual.json --run_name "eval_manual_multichunk"
+    cmd: .venv/bin/python src/export_results.py --input data/eval/raw_evaluations_manual.json --output data/eval/evaluation_results_manual.json --run_name "manual-tuning-v1"
     deps:
       - data/eval/raw_evaluations_manual.json
       - src/export_results.py

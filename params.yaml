@@ -2,31 +2,31 @@
 urls_path: data/urls/database_urls.txt
 
 # Chunking
-chunk_max_tokens: 350
-chunk_merge_peers: True
+chunk_max_tokens: 250
+chunk_merge_peers: true
 
 # Embeddings
-dense_embedding_model: "BAAI/bge-base-en-v1.5"
+dense_embedding_model: BAAI/bge-base-en-v1.5
 dense_embd_dim: 768
-sparse_embedding_model: "Qdrant/bm25"
-normalize_embeddings: True
+sparse_embedding_model: Qdrant/bm25
+normalize_embeddings: true
 
 # Vector store
-collection_name: 'simple-wikipedia'
+collection_name: simple-wikipedia
 persist_directory: data/embeddings
 
 # Retrieval & reranking
-rerank_model: 'cross-encoder/ms-marco-MiniLM-L-6-v2'
-retrieval_k: 60                    # hybrid retrieve top-k, then rerank down to top_n
-rerank_score_threshold: -2.5       # keep only reranker scores strictly above this
-top_n: 5
+rerank_model: cross-encoder/ms-marco-MiniLM-L-6-v2
+retrieval_k: 50                    # hybrid retrieve top-k, then rerank down to top_n
+rerank_score_threshold: 0.5       # only real lever — tighter helps synth, looser helps manual; 0.5 is mid
+top_n: 3
 
 # Chat / answer generation
-chat_model: 'gemma4:31b'
+chat_model: gemma4:31b
 chat_temperature: 0.0
 
 # Synthetic golden-set generation
-synthesizer_model: 'qwen3.8:27b'
+synthesizer_model: qwen3.8:27b
 synthesizer_temperature: 0.7
 
 # Golden quality controls (single-chunk-baseline tier)
@@ -36,12 +36,12 @@ min_golden_quality_to_keep: 0.5    # hard floor — goldens still below this aft
 num_evolutions: 1                  # evolution passes per question (DeepEval default is 1)
 
 # Validation / LLM-as-a-judge
-validator_model: 'gemma4:31b'
+validator_model: gemma4:31b
 validator_temperature: 0.0
 
 # Weights & Biases — one parent project for all runs, shared group per logical
 # experiment. Both values can be overridden by the WANDB_PROJECT / WANDB_GROUP
 # env vars (which take precedence). Set WANDB_GROUP per run to keep related
 # pipeline stages together under one cluster in the W&B UI.
-wandb_project: 'hybrid-rag'
-wandb_group: 'hyperparameter-tuning'
+wandb_project: rag-optimization
+wandb_group: hyperparameter-tuning

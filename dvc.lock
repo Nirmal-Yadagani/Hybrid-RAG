@@ -9,48 +9,48 @@ stages:
       size: 7038
     - path: src/create_dataset.py
       hash: md5
-      md5: d1b29437d798ddbbf649e0f00802365e
-      size: 5710
+      md5: 8c4ff86acb17d0fcc1f674fb5615999d
+      size: 5917
     params:
       params.yaml:
         urls_path: data/urls/database_urls.txt
     outs:
     - path: data/raw/ai_ml_raw_html.json
       hash: md5
-      md5: 4a8974f12a6eb7f880a3cbd1c8b77aa3
-      size: 12106564
+      md5: 7dc0237288500664077356f7adc114db
+      size: 12019706
   chunk:
     cmd: .venv/bin/python src/create_chunks.py
     deps:
     - path: data/raw/ai_ml_raw_html.json
       hash: md5
-      md5: 4a8974f12a6eb7f880a3cbd1c8b77aa3
-      size: 12106564
+      md5: 7dc0237288500664077356f7adc114db
+      size: 12019706
     - path: src/create_chunks.py
       hash: md5
-      md5: e11f6fe314b5739507c0d5a3230ee0a0
-      size: 3998
+      md5: e451e14da1fe51b7c2626fa66352ebf3
+      size: 4180
     params:
       params.yaml:
-        chunk_max_tokens: 350
+        chunk_max_tokens: 250
         chunk_merge_peers: true
         dense_embedding_model: BAAI/bge-base-en-v1.5
     outs:
     - path: data/processed/ai_ml_rag_chunks.json
       hash: md5
-      md5: eef3c967dddd0ec37efb1fc9bc2df249
-      size: 4920077
+      md5: 7a1009181e747d0f83291a0f70262af5
+      size: 5352213
   embed:
     cmd: .venv/bin/python src/create_embeddings.py
     deps:
     - path: data/processed/ai_ml_rag_chunks.json
       hash: md5
-      md5: eef3c967dddd0ec37efb1fc9bc2df249
-      size: 4920077
+      md5: 7a1009181e747d0f83291a0f70262af5
+      size: 5352213
     - path: src/create_embeddings.py
       hash: md5
-      md5: dd8592eaeb44a1aca754d3fe45cbe5c3
-      size: 4736
+      md5: 4951698a15ed30a4e9077ff460b5b79f
+      size: 4905
     params:
       params.yaml:
         collection_name: simple-wikipedia
@@ -62,19 +62,19 @@ stages:
     outs:
     - path: data/embeddings_status.json
       hash: md5
-      md5: 8516fb121cfc57016b107c4f84729863
+      md5: 20117e3bd1003477c8fd287bd25b48a5
       size: 332
   generate:
     cmd: .venv/bin/python src/generate_baseline.py
     deps:
     - path: data/embeddings_status.json
       hash: md5
-      md5: 8516fb121cfc57016b107c4f84729863
+      md5: 20117e3bd1003477c8fd287bd25b48a5
       size: 332
     - path: src/generate_baseline.py
       hash: md5
-      md5: 99311bbf4048ef1b02dce2d8e152a14c
-      size: 6721
+      md5: f8bbdb998c69512a4b41213ec741ba54
+      size: 6775
     params:
       params.yaml:
         collection_name: simple-wikipedia
@@ -88,8 +88,8 @@ stages:
     outs:
     - path: data/eval/goldens_100_raw.json
       hash: md5
-      md5: 6e6fde3419c7285de4e8941b0a5d37bd
-      size: 230703
+      md5: 805b2440e0c9fb851346cbc7ce894e92
+      size: 217873
   eval:
     cmd: .venv/bin/python src/run_evals.py
     deps:
@@ -147,12 +147,12 @@ stages:
     deps:
     - path: data/eval/goldens_100_raw.json
       hash: md5
-      md5: 6e6fde3419c7285de4e8941b0a5d37bd
-      size: 230703
+      md5: 805b2440e0c9fb851346cbc7ce894e92
+      size: 217873
     - path: src/validate_goldens.py
       hash: md5
-      md5: 98a4d0914398151102f350060114182e
-      size: 6718
+      md5: 7e4d36257900bbaed69dc3dc3a9659bd
+      size: 6809
     params:
       params.yaml:
         validator_model: gemma4:31b
@@ -160,5 +160,118 @@ stages:
     outs:
     - path: data/eval/goldens_clean.json
       hash: md5
-      md5: df0cf4b064e692fdc9d0e75a8d547220
-      size: 121420
+      md5: 5f7a689d7b9b6b4aaf27e31815041b65
+      size: 107620
+  eval_synthetic:
+    cmd: .venv/bin/python src/run_evals.py --input data/eval/goldens_clean.json 
+      --output data/eval/raw_evaluations_synthetic.json --cache 
+      data/eval/cache_synthetic.json
+    deps:
+    - path: data/embeddings_status.json
+      hash: md5
+      md5: 20117e3bd1003477c8fd287bd25b48a5
+      size: 332
+    - path: data/eval/goldens_clean.json
+      hash: md5
+      md5: 5f7a689d7b9b6b4aaf27e31815041b65
+      size: 107620
+    - path: src/run_evals.py
+      hash: md5
+      md5: 8ef06ec6cf92ddbd0259d1bf1cfeb19b
+      size: 6174
+    params:
+      params.yaml:
+        chat_model: gemma4:31b
+        chat_temperature: 0.0
+        rerank_model: cross-encoder/ms-marco-MiniLM-L-6-v2
+        rerank_score_threshold: 0.5
+        retrieval_k: 50
+        top_n: 3
+    outs:
+    - path: data/eval/cache_synthetic.json
+      hash: md5
+      md5: 2a805d440037e9e3bce24646023a11f4
+      size: 164121
+    - path: data/eval/raw_evaluations_synthetic.json
+      hash: md5
+      md5: 51deefa805839f459a7e646e1e6fccca
+      size: 296109
+  export_synthetic:
+    cmd: .venv/bin/python src/export_results.py --input 
+      data/eval/raw_evaluations_synthetic.json --output 
+      data/eval/evaluation_results_synthetic.json --run_name 
+      "synthetic-tuning-v1"
+    deps:
+    - path: data/eval/raw_evaluations_synthetic.json
+      hash: md5
+      md5: 51deefa805839f459a7e646e1e6fccca
+      size: 296109
+    - path: src/export_results.py
+      hash: md5
+      md5: d6445b4d8f28eb2ae52b425767fe5699
+      size: 4341
+    params:
+      params.yaml:
+        chunk_max_tokens: 250
+        top_n: 3
+    outs:
+    - path: data/eval/evaluation_results_synthetic.json
+      hash: md5
+      md5: 4a77863e80caf982b362aea084d5683c
+      size: 190965
+  eval_manual:
+    cmd: .venv/bin/python src/run_evals.py --input data/eval/manual_eval.json 
+      --output data/eval/raw_evaluations_manual.json --cache 
+      data/eval/cache_manual.json
+    deps:
+    - path: data/embeddings_status.json
+      hash: md5
+      md5: 20117e3bd1003477c8fd287bd25b48a5
+      size: 332
+    - path: data/eval/manual_eval.json
+      hash: md5
+      md5: 1419c8855601a6eeae59562f4f02cd6a
+      size: 27979
+    - path: src/run_evals.py
+      hash: md5
+      md5: 8ef06ec6cf92ddbd0259d1bf1cfeb19b
+      size: 6174
+    params:
+      params.yaml:
+        chat_model: gemma4:31b
+        chat_temperature: 0.0
+        rerank_model: cross-encoder/ms-marco-MiniLM-L-6-v2
+        rerank_score_threshold: 0.5
+        retrieval_k: 50
+        top_n: 3
+    outs:
+    - path: data/eval/cache_manual.json
+      hash: md5
+      md5: 023d71a72f0f4cdee2fcd3e232f68515
+      size: 31595
+    - path: data/eval/raw_evaluations_manual.json
+      hash: md5
+      md5: bdf06ad0b2a5fecbf420c86cfc33f8a0
+      size: 58744
+  export_manual:
+    cmd: .venv/bin/python src/export_results.py --input 
+      data/eval/raw_evaluations_manual.json --output 
+      data/eval/evaluation_results_manual.json --run_name "manual-tuning-v1"
+    deps:
+    - path: data/eval/raw_evaluations_manual.json
+      hash: md5
+      md5: bdf06ad0b2a5fecbf420c86cfc33f8a0
+      size: 58744
+    - path: src/export_results.py
+      hash: md5
+      md5: d6445b4d8f28eb2ae52b425767fe5699
+      size: 4341
+    params:
+      params.yaml:
+        chunk_max_tokens: 250
+        top_n: 3
+    outs:
+    - path: data/eval/evaluation_results_manual.json
+      hash: md5
+      md5: 929fbb320487788de3255e5093c7a6fd
+      size: 36528

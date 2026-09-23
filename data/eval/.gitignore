@@ -6,3 +6,9 @@
 /goldens_clean.json
 /generated_manual_test_cases.json
 /manual_eval.json
+/raw_evaluations_synthetic.json
+/cache_synthetic.json
+/evaluation_results_synthetic.json
+/raw_evaluations_manual.json
+/cache_manual.json
+/evaluation_results_manual.json

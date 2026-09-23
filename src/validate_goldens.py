@@ -10,6 +10,10 @@ from langchain_core.prompts import ChatPromptTemplate
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from logger import StageLogger  # noqa: E402
 
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 from src.data import load_config
 
 log = StageLogger("validate_goldens")
@@ -128,7 +132,7 @@ def validate_dataset():
                 "context": context_str,
                 "question": question,
                 "expected_output": expected_output
-            })
+            }) # type: ignore
 
             if audit.is_answerable and audit.is_faithful:
                 clean_goldens.append(item)

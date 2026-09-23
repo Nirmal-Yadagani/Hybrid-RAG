@@ -254,13 +254,30 @@ where each example has a known target, while unsupervised learning trains
 on **unlabeled data**, discovering patterns on its own. [Doc 1]
 ```
 
-### Evaluation results
+### Tunable parameters
 
-`export_results.py` writes an aggregation summary and a W&B table that you can render as graphs and tables. Placeholder for visualizing results (drop screenshots into `docs/eval-results/`):
+Every lever lives in [`params.yaml`](params.yaml). The main knobs and what they touch:
 
-> 📷 *Add your eval results screenshots here* — `docs/eval-results/aggregate_metrics.png`
-> 📷 *Add your eval results screenshots here* — `docs/eval-results/detailed_table.png`
-> 📷 *Add your eval results screenshots here* — `docs/eval-results/metric_scores.png`
+| Parameter | Effect on the pipeline |
+|---|---|
+| `chunk_max_tokens` / `chunk_merge_peers` | Chunk size → everything downstream (chunk, embed, eval). |
+| `retrieval_k` | Size of the candidate pool before reranking. |
+| `rerank_score_threshold` | Stricter filter for the reranker (defaults `-2.5`, a near-no-op). |
+| `top_n` | Final number of docs injected into generation. |
+| `chat_model` / `chat_temperature` | Generation model and randomness. |
+| `synthesizer_*` / `quality_*` / `num_evolutions` | Golden-set quality and evolution. |
+| `wandb_project` / `wandb_group` | Where runs are logged and how they cluster in the W&B UI. |
+
+### Results & parameter tuning
+
+A full sweep of the retriever parameters (DVC-experimented, metric-logged to W&B `rag-optimization`, model `nirmal_yadagani`) quantifies exactly what moved the needle. Synthetic goldens = 67 cases; manual hard questions = 10.
+
+| Retriever config | Contextual Relevancy | Contextual Recall | Contextual Precision | Answer Correctness | Citation Accuracy |
+|---|---|---|---|---|---|
+| **Baseline (chunk=350)** | **0.585** | 0.942 | 0.915 | 0.943 | 0.916 |
+| **chunk=250 (best config)** | **0.745** | 0.942 | 0.958 | 0.975 | 0.950 |
+
+The single biggest win was cutting chunks from 350 → 250 — **Contextual Relevancy jumped +27% (0.585 → 0.745)**. A tighter chunk shrinks each retrievable document to one topic, which directly raises the judge's relevance score. Reranking (`rerank_score_threshold: 0.5`) added another +12% over the baseline and lifted Answer Correctness, with a small trade-off on Contextual Recall. `top_n` (3→7) turned out to be a no-op. The `rerank_score_threshold` sweep revealed a real tension: synthetic quality peaks at a tighter threshold while the harder manual questions need a looser one — the answer is a middle-ground value that both stay above 0.5.
 
 ---
 
