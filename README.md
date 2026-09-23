@@ -129,9 +129,7 @@ The retrieval quality of a RAG stack hinges on how the candidate set is ranked. 
 
 For a query `q` and chunk `d`, the dense component measures directional agreement between their embedding vectors:
 
-```
-sim_dense(q, d) = <E_dense(q), E_dense(d)> / (||E_dense(q)|| · ||E_dense(d||)
-```
+$$\text{sim}_{\text{dense}}(q, d) = \frac{\langle E_{\text{dense}}(q), E_{\text{dense}}(d) \rangle}{||E_{\text{dense}}(q)|| \cdot ||E_{\text{dense}}(d)||} $$
 
 where `E_dense(·)` is `BAAI/bge-base-en-v1.5`. Candidates are collected greedily (`retrieval_k`) from the dense partition.
 
@@ -139,9 +137,7 @@ where `E_dense(·)` is `BAAI/bge-base-en-v1.5`. Candidates are collected greedil
 
 For the same query and chunk, BM25 aggregates per-term contributions keyed on term frequency (`tf`), IDF-weighting, and length normalization:
 
-```
-scoresparse(q, d) = Σ_{t ∈ q} IDF(t) · ( f(t, d) (k3 + 1) ) / ( f(t, d) + k3 · (1 + b (1 − b) ) )
-```
+$$ \text{score}_{\text{sparse}}(q, d) = \sum_{t \in q} \text{IDF}(t) \cdot \frac{f(t, d)(k_3 + 1)}{f(t, d) + k_3 \cdot (1 - b + b \cdot \frac{|d|}{\text{avgdl}})} $$
 
 where `f(t, d)` is the term frequency of `t` in `d`, `IDF(t)` is the inverse document frequency, and `k3`, `b` are the FastEmbed defaults. This is what recovers exact-name / out-of-distribution vocabulary the dense model under-weights.
 
@@ -149,10 +145,13 @@ where `f(t, d)` is the term frequency of `t` in `d`, `IDF(t)` is the inverse doc
 
 Before answer generation, the top-`k` candidates are re-scored in one shot as `(query, doc)` pairs and filtered by a learned margin `τ` (`rerank_score_threshold`):
 
-```
-keep(doc_i) = 1  if  σ_ms-marco(q, d_i) > τ
-            = 0              otherwise
-```
+$$ 
+\text{keep}(doc_i) = 
+\begin{cases} 
+1 & \text{if } \sigma_{\text{ms-marco}}(q, d_i) > \tau \\ 
+0 & \text{otherwise} 
+\end{cases} 
+$$
 
 The surviving set (truncated to `top_n`) drives generation, with a guaranteed-fallback to the single best-scoring doc if `τ` filters everything out — so the chat always returns an answer.
 
@@ -181,17 +180,22 @@ uv venv
 uv pip install -e .
 ```
 
+
 ### Configure your environment
 
-`.env` is gitignored. Create it before running anything:
+Sensitive keys are loaded via a `.env` file, which is gitignored. 
 
+Copy the provided template:
 ```bash
-touch .env   # then add the variables below
-# inside .env:
+cp .env.example .env
+```
+Populate .env with your active keys:
+```bash
 HF_TOKEN=your_huggingface_token
 GOOGLE_API_KEY=your_gemini_api_key
 WANDB_API_KEY=your_wandb_api_key      # optional — only if you log to W&B
 ```
+
 
 ### Prepare the target data
 
@@ -220,16 +224,18 @@ dvc exp show              # side-by-side comparison of runs
 
 ### Pipeline stages
 
-Each stage is also runnable standalone (from the repo root, using the `venv/bin/python` path so `python` isn't required on `PATH`):
+Because DVC orchestrates the DAG, you should rarely run the underlying Python scripts directly. Instead, run individual stages using DVC, which automatically handles caching and dependencies:
 
 ```bash
-.venv/bin/python src/create_dataset.py       # scrape → data/raw/ai_ml_raw_html.json
-.venv/bin/python src/create_chunks.py        # chunk → data/processed/ai_ml_rag_chunks.json
-.venv/bin/python src/create_embeddings.py    # index → Qdrant collection
-.venv/bin/python src/validate_goldens.py     # validate goldens
-.venv/bin/python src/run_evals.py --input data/eval/goldens_clean.json --output data/eval/raw_evaluations.json --cache data/eval/cache.json
-.venv/bin/python src/export_results.py --input data/eval/raw_evaluations.json --output data/eval/evaluation_results.json --run_name eval_synthetic_baseline
+dvc repro dataset           # scrape → data/raw/ai_ml_raw_html.json
+dvc repro chunk             # chunk → data/processed/ai_ml_rag_chunks.json
+dvc repro embed             # index → Qdrant collection
+dvc repro generate          # generate synthetic goldens
+dvc repro validate_goldens  # validate goldens
+dvc repro eval_synthetic    # run the DeepEval judge on the synthetic baseline
+dvc repro eval_manual       # run the DeepEval judge on the manual multi-chunk set
 ```
+(Note: Under the hood, DVC executes the scripts via .venv/bin/python src/... as defined in dvc.yaml).
 
 ### Interactive chat
 
@@ -283,7 +289,7 @@ The single biggest win was cutting chunks from 350 → 250 — **Contextual Rele
 
 ## Roadmap & future work
 
-1. **Multi-document retrieval & hybrid multi-query expansion.** Add a LangChain `MultiQueryRetriever` / `Self-Ask` generator so complex questions are rephrased into multiple queries, then merged — scaling the system beyond single-shot retrieval.
+1. **Agentic Query Decomposition.** Migrate from linear retrieval to a multi-agent routing architecture (via frameworks like Microsoft AutoGen, OpenAI Agents SDK or LangGraph). By decomposing complex, multi-hop questions into independent sub-queries, the system will eliminate cross-encoder token dilution and bypass the hard limits of the `top_n` capacity bottleneck.
 2. **Retrieval & answer improvement loop (RAGAs / faithfulness).** Extend the DeepEval suite with `Faithfulness` and `AnswerRelevancy` metrics plus a retrieval-augmented evaluation harness, closing the loop between measured accuracy and pipeline tuning.
 3. **Distributed serving & multi-modal ingestion.** Migrate Qdrant to a remote cluster behind the Qdrant HTTP API, add a `docs`-style ingestion path (PDFs, markdown) for enterprise documents, and expose the chain behind an HTTP API for external consumers.
 
